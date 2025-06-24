@@ -25,15 +25,16 @@ open class TreiberStackWithElimination<E> : Stack<E> {
             }
         }
 
-        // getAndSet via compareAndSet
-        while (true) {
-            val last = eliminationArray.get(index)
-            if (eliminationArray.compareAndSet(index, last, CELL_STATE_EMPTY)) {
-                // It may happen that another thread has popped the value while we were resetting the state to EMPTY
-                // In this case we need to return 'true' answering that elimination successfully worked
-                return last == CELL_STATE_RETRIEVED
-            }
+        if (eliminationArray.compareAndSet(index, element, CELL_STATE_EMPTY)) {
+            // if the cell has the original element, then it's guaranteed no other thread made a 'pop'
+            // operation for this cell
+            return false
         }
+
+        // if the cell was modified (did not contain the original element), this means that
+        // some other thread made a 'pop' operation, and we expect that the cell contains the 'RETRIEVED' state
+        check(eliminationArray.compareAndSet(index, CELL_STATE_RETRIEVED, CELL_STATE_EMPTY))
+        return true
     }
 
     override fun pop(): E? = tryPopElimination() ?: stack.pop()
