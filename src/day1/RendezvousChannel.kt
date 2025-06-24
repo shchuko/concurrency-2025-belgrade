@@ -16,20 +16,24 @@ class RendezvousChannel<E : Any> {
 
     suspend fun send(element: E) {
         while (true) {
+            val curTail = tail.get()
+            val curHead = head.get()
+
             // Is this queue empty or contain other senders?
             if (isEmptyOrContainsSenders()) {
                 val success = suspendCoroutine<Boolean> { continuation ->
                     val node = Node(element, continuation as Continuation<Any?>)
-                    if (!tryAddNode(tail.get(), node)) {
+                    if (!tryAddNode(curTail, node)) {
                         // Fail and retry.
-                        continuation.resume(null)
+                        continuation.resume(false)
                     }
                 }
                 // Finish on success and retry on failure.
                 if (success) return
             } else {
                 // The queue contains receivers, try to extract the first one.
-                val firstReceiver = tryExtractNode(head.get()) ?: continue
+                val firstReceiver = tryExtractNode(curHead) ?: continue
+                check(firstReceiver.element == RECEIVER) { "Expected RECEIVER, got SENDER" }
                 firstReceiver.continuation!!.resume(element)
                 return
             }
@@ -38,11 +42,14 @@ class RendezvousChannel<E : Any> {
 
     suspend fun receive(): E {
         while (true) {
+            val curTail = tail.get()
+            val curHead = head.get()
+
             // Is this queue empty or contain other receivers?
             if (isEmptyOrContainsReceivers()) {
                 val element = suspendCoroutine<E?> { continuation ->
                     val node = Node(RECEIVER, continuation as Continuation<Any?>)
-                    if (!tryAddNode(tail.get(), node)) {
+                    if (!tryAddNode(curTail, node)) {
                         // Fail and retry.
                         continuation.resume(null)
                     }
@@ -53,31 +60,43 @@ class RendezvousChannel<E : Any> {
                 return element
             } else {
                 // The queue contains senders, try to extract the first one.
-                val firstSender = tryExtractNode(head.get()) ?: continue
+                val firstSender = tryExtractNode(curHead) ?: continue
                 firstSender.continuation!!.resume(true)
+                check(firstSender.element != RECEIVER) { "Expected SENDER, got RECEIVER" }
                 return firstSender.element as E
             }
         }
     }
 
     private fun isEmptyOrContainsReceivers(): Boolean {
-        TODO(" Implement me!")
         // For receivers, Node.element === RECEIVER
+        val firstNode = head.get().next
+        val firstElement = firstNode.get()?.element
+        return firstElement == null || firstElement == RECEIVER
     }
 
     private fun isEmptyOrContainsSenders(): Boolean {
-        TODO(" Implement me!")
         // For senders, Node.element !== RECEIVER
+        val firstNode = head.get().next
+        val firstElement = firstNode.get()?.element
+        return firstElement != RECEIVER
     }
 
     private fun tryAddNode(curTail: Node, newNode: Node): Boolean {
-        TODO("Implement me!")
-        // TODO: Return `false` if the attempt has failed.
+        if (curTail.next.compareAndSet(null, newNode)) {
+            tail.compareAndSet(curTail, newNode)
+            return true
+        }
+        tail.compareAndSet(curTail, curTail.next.get())
+        return false
     }
 
     private fun tryExtractNode(curHead: Node): Node? {
-        TODO("Implement me!")
-        // TODO: Return a node with the extracted continuation & element.
+        val nextNode = curHead.next.get() ?: return null
+        if (head.compareAndSet(curHead, nextNode)) {
+            return nextNode
+        }
+        return null
     }
 
     class Node(
