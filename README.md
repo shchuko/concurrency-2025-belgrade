@@ -59,3 +59,12 @@ To test your solution, please run:
 
 * `./gradlew test --tests MSQueueTest` on Linux or MacOS
 * `gradlew test --tests MSQueueTest` on Windows
+
+
+### Rendezvous channel (OPTIONAL)
+
+In [`src/day1/RendezvousChannel.kt`](src/day1/RendezvousChannel.kt), implement a rendezvous channel for Kotlin Coroutines.
+Please follow the `TODO`s in the code.
+
+* `./gradlew test --tests RendezvousChannelTest` on Linux or MacOS
+* `gradlew test --tests RendezvousChannelTest` on Windows
