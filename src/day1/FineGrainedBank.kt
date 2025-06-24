@@ -37,9 +37,13 @@ class FineGrainedBank(accountsNumber: Int) : Bank {
         require(amount > 0) { "Invalid amount: $amount" }
         require(fromId != toId) { "fromId == toId" }
 
-        accounts[fromId].withLock { from ->
-            check(amount <= from.amount) { "Underflow" }
-            accounts[toId].withLock { to ->
+        val from = accounts[fromId]
+        val to = accounts[toId]
+        val lockOrder = if (fromId > toId) from to to else to to from
+
+        lockOrder.first.withLock {
+            lockOrder.second.withLock {
+                check(amount <= from.amount) { "Underflow" }
                 check(!(amount > MAX_AMOUNT || to.amount + amount > MAX_AMOUNT)) { "Overflow" }
                 from.amount -= amount
                 to.amount += amount
