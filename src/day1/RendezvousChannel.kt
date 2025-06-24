@@ -72,14 +72,14 @@ class RendezvousChannel<E : Any> {
         // For receivers, Node.element === RECEIVER
         val firstNode = head.get().next
         val firstElement = firstNode.get()?.element
-        return firstElement == null || firstElement == RECEIVER
+        return firstElement == null || firstElement === RECEIVER
     }
 
     private fun isEmptyOrContainsSenders(): Boolean {
         // For senders, Node.element !== RECEIVER
         val firstNode = head.get().next
         val firstElement = firstNode.get()?.element
-        return firstElement != RECEIVER
+        return firstElement !== RECEIVER
     }
 
     private fun tryAddNode(curTail: Node, newNode: Node): Boolean {
