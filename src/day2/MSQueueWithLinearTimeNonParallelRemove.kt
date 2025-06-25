@@ -20,7 +20,9 @@ class MSQueueWithLinearTimeNonParallelRemove<E> : QueueWithRemove<E> {
             val curTail = tail.get()
             if (curTail.next.compareAndSet(null, node)) {
                 tail.compareAndSet(curTail, node)
-                curTail.tryPhysicallyRemove()
+                if (curTail.extractedOrRemoved) {
+                    curTail.tryPhysicallyRemove()
+                }
                 return
             } else {
                 tail.compareAndSet(curTail, curTail.next.get())
@@ -102,16 +104,13 @@ class MSQueueWithLinearTimeNonParallelRemove<E> : QueueWithRemove<E> {
          * @return `true` if the node was physically removed (for debug purposes)
          */
         fun tryPhysicallyRemove(): Boolean {
-            // do not remove if not marked as removed
-            if (!extractedOrRemoved) {
-                return false
-            }
             // do not remove if the node is tail
-            if (next.get() == null) {
+            val next = next.get()
+            if (next == null) {
                 return false
             }
             val prev = findPrev(head.get())
-            prev?.next?.set(next.get())
+            prev?.next?.set(next)
             return prev != null
         }
 
