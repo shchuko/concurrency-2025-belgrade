@@ -12,19 +12,16 @@ class CountersSnapshot {
     fun incrementCounter3() = counter3.getAndIncrement()
 
     fun countersSnapshot(): Triple<Long, Long, Long> {
-        var snapshot1: Long
-        var snapshot2: Long
-        var snapshot3: Long
-
         while (true) {
-            snapshot1 = counter1.get()
-            snapshot2 = counter2.get()
-            snapshot3 = counter3.get()
+            val snapshot1 = counter1.get()
+            val snapshot2 = counter2.get()
+            val snapshot3 = counter3.get()
 
             val snapshot1After = counter1.get()
             val snapshot2After = counter2.get()
-            if (snapshot1 == snapshot1After && snapshot2 == snapshot2After) break
+            if (snapshot1 == snapshot1After && snapshot2 == snapshot2After) {
+                return Triple(snapshot1, snapshot2, snapshot3)
+            }
         }
-        return Triple(snapshot1, snapshot2, snapshot3)
     }
 }
