@@ -16,9 +16,9 @@ class AtomicArrayWithCAS2SingleWriter<E : Any>(size: Int, initialValue: E) {
         }
     }
 
-    fun get(index: Int): E {
-        // TODO: the cell can store CAS2Descriptor
-        return array[index] as E
+    fun get(index: Int): E = when (val cur = array[index]) {
+        is AtomicArrayWithCAS2SingleWriter<E>.CAS2Descriptor -> cur[index]
+        else -> cur as E
     }
 
     fun cas2(
@@ -41,10 +41,55 @@ class AtomicArrayWithCAS2SingleWriter<E : Any>(size: Int, initialValue: E) {
         val status = AtomicReference(UNDECIDED)
 
         fun apply() {
-            // TODO: Install the descriptor, update the status, and update the cells;
-            // TODO: create functions for each of these three phases.
-            // TODO: In this task, only one thread can call cas2(..),
-            // TODO: so cas2(..) calls cannot be executed concurrently.
+            while (true) {
+                when (val cur1 = array[index1] as E) {
+                    is AtomicArrayWithCAS2SingleWriter<E>.CAS2Descriptor -> {
+                        error("CAS2Descriptor is unexpected in the single writer mode")
+                    }
+
+                    else -> {
+                        if (cur1 != expected1) {
+                            status.set(FAILED)
+                            return
+                        }
+
+                        if (array.compareAndSet(index1, expected1, this)) {
+                            val cur2 = array[index2]
+                            check(cur2 !is AtomicArrayWithCAS2SingleWriter<*>.CAS2Descriptor) { "CAS2Descriptor is unexpected in B in single writer mode" }
+
+                            if (cur2 != expected2) {
+                                status.set(FAILED)
+                                array.compareAndSet(index1, this, expected1)
+                                return
+                            }
+
+                            if (!array.compareAndSet(index2, expected2, this)) {
+                                status.set(FAILED)
+                                array.compareAndSet(index1, this, expected1)
+                                return
+                            }
+
+                            status.compareAndSet(UNDECIDED, SUCCESS)
+                            array.compareAndSet(index2, this, update2)
+                            array.compareAndSet(index1, this, update1)
+                            return
+                        }
+                    }
+                }
+            }
+        }
+
+        operator fun get(index: Int): E {
+            val shouldTakeExpected = when (status.get()) {
+                UNDECIDED, FAILED -> true
+                SUCCESS -> false
+            }
+
+            return when (index) {
+                index1 -> if (shouldTakeExpected) expected1 else update1
+                index2 -> if (shouldTakeExpected) expected2 else update2
+                else -> error("Index $index does not match any [$expected1, $expected2]")
+            }
         }
     }
 
