@@ -16,9 +16,9 @@ class AtomicArrayWithCAS2AndImplementedDCSS<E : Any>(size: Int, initialValue: E)
         }
     }
 
-    fun get(index: Int): E {
-        // TODO: Copy the implementation from `AtomicArrayWithCAS2Simplified`
-        TODO("Implement me")
+    fun get(index: Int): E = when (val cur = array[index]) {
+        is AtomicArrayWithCAS2AndImplementedDCSS<E>.CAS2Descriptor -> cur[index]
+        else -> cur as E
     }
 
     fun cas2(
@@ -52,8 +52,88 @@ class AtomicArrayWithCAS2AndImplementedDCSS<E : Any>(size: Int, initialValue: E)
         val status = AtomicReference(UNDECIDED)
 
         fun apply() {
-            // TODO: Copy the implementation from `AtomicArrayWithCAS2Simplified`
-            // TODO: and use `dcss(..)` to install the descriptor.
+            while (true) {
+                when (val value1 = array[index1]) {
+                    is AtomicArrayWithCAS2AndImplementedDCSS<E>.CAS2Descriptor -> {
+                        value1.installIntoIndex2()
+                        value1.doLogicalAndPhysicalApply()
+                    }
+
+                    else -> {
+                        if (value1 != expected1) {
+                            status.set(FAILED)
+                            return
+                        }
+
+                        if (!dcss(index1, expected1, this, status, UNDECIDED)) {
+                            continue
+                        }
+
+                        installIntoIndex2()
+                        doLogicalAndPhysicalApply()
+                        return
+                    }
+                }
+            }
+        }
+
+        private fun installIntoIndex2() {
+            while (true) {
+                when (val value2 = array[index2]) {
+                    is AtomicArrayWithCAS2AndImplementedDCSS<E>.CAS2Descriptor -> {
+                        // already installed
+                        if (value2 === this) {
+                            return
+                        }
+
+                        value2.installIntoIndex2()
+                        value2.doLogicalAndPhysicalApply()
+                    }
+
+                    else -> {
+                        if (value2 != expected2) {
+                            status.compareAndSet(UNDECIDED, FAILED)
+                            return
+                        }
+
+                        if (status.get() != UNDECIDED) {
+                            return
+                        }
+
+                        // install yourself and exit on success
+                        if (dcss(index2, expected2, this, status, UNDECIDED)) {
+                            return
+                        }
+                    }
+                }
+            }
+        }
+
+        private fun doLogicalAndPhysicalApply() {
+            status.compareAndSet(UNDECIDED, SUCCESS)
+
+            val status = status.get()
+            check(status != UNDECIDED)
+
+            val desiredValue2 = if (status == SUCCESS) update2 else expected2
+            val desiredValue1 = if (status == SUCCESS) update1 else expected1
+
+            array.compareAndSet(index2, this, desiredValue2)
+            array.compareAndSet(index1, this, desiredValue1)
+        }
+
+
+        operator fun get(index: Int): E {
+            val shouldTakeExpected = when (status.get()) {
+                UNDECIDED, FAILED -> true
+                SUCCESS -> false
+            }
+
+            return when (index) {
+                index1 -> if (shouldTakeExpected) expected1 else update1
+                index2 -> if (shouldTakeExpected) expected2 else update2
+                else -> error("Index $index does not match any [$expected1, $expected2]")
+            }
         }
     }
 
