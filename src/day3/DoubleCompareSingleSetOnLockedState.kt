@@ -29,32 +29,32 @@ class DoubleCompareSingleSetOnLockedState<E : Any>(initialValue: E) : DoubleComp
         // try lock A
         var curA: Any
         while (true) {
-            curA = a.get()
-            // if it was already locked, do one more iteration
-            if (curA === LOCKED) {
-                continue
-            }
+            curA = a.getAndSet(LOCKED)
 
-            if (curA != expectedA) {
-                return false
-            }
+            when (curA) {
+                // the lock is held by someone else, try again
+                LOCKED -> continue
 
-            // on a successful lock, exit the loop
-            if (a.compareAndSet(curA, LOCKED)) {
-                break
+                // we successfully acquired the lock, and the A is expected
+                expectedA -> {
+                    if (b.get() == expectedB) {
+                        // B is also expected -> update A and return true
+                        a.set(updateA)
+                        return true
+                    }
+
+                    // B is not expected -> reset A to the previous value and return false
+                    a.set(curA)
+                    return false
+                }
+
+                // we successfully acquired the lock, but the A is not expected -> release the lock and return false
+                else -> {
+                    a.set(curA)
+                    return false
+                }
             }
         }
-
-        // sanity check
-        check(a.get() === LOCKED)
-
-        // if A or B does not contain the expected values, reset unlock the A and proceed
-        if (curA != expectedA || b.get() != expectedB) {
-            a.set(curA)
-            return false
-        }
-        a.set(updateA)
-        return true
     }
 
     override fun setB(value: E) {
