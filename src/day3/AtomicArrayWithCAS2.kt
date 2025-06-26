@@ -3,6 +3,7 @@
 package day3
 
 import java.util.concurrent.atomic.*
+import day3.AtomicArrayWithCAS2.CAS2Status.*
 
 // This implementation never stores `null` values.
 class AtomicArrayWithCAS2<E : Any>(size: Int, initialValue: E) {
@@ -15,21 +16,210 @@ class AtomicArrayWithCAS2<E : Any>(size: Int, initialValue: E) {
         }
     }
 
-    fun get(index: Int): E? {
-        // TODO: the cell can store a descriptor
-        return array[index] as E?
+    fun get(index: Int): E {
+        while (true) {
+            when (val cur = array[index]) {
+                is AtomicArrayWithCAS2<E>.DcssDescriptor -> cur.doLogicalAndPhysicalApply()
+
+                is AtomicArrayWithCAS2<E>.CAS2Descriptor -> return cur[index]
+                else -> return cur as E
+            }
+        }
     }
 
     fun cas2(
-        index1: Int, expected1: E?, update1: E?,
-        index2: Int, expected2: E?, update2: E?
+        index1: Int, expected1: E, update1: E,
+        index2: Int, expected2: E, update2: E
     ): Boolean {
         require(index1 != index2) { "The indices should be different" }
-        // TODO: this implementation is not linearizable,
-        // TODO: Store a CAS2 descriptor in array[index1].
-        if (array[index1] != expected1 || array[index2] != expected2) return false
-        array[index1] = update1
-        array[index2] = update2
-        return true
+        val descriptor = if (index1 < index2) {
+            CAS2Descriptor(
+                index1 = index1, expected1 = expected1, update1 = update1,
+                index2 = index2, expected2 = expected2, update2 = update2
+            )
+        } else {
+            CAS2Descriptor(
+                index1 = index2, expected1 = expected2, update1 = update2,
+                index2 = index1, expected2 = expected1, update2 = update1
+            )
+        }
+        descriptor.apply()
+        return descriptor.status.get() === SUCCESS
+    }
+
+    inner class CAS2Descriptor(
+        val index1: Int,
+        val expected1: E,
+        val update1: E,
+        val index2: Int,
+        val expected2: E,
+        val update2: E
+    ) {
+        val status = AtomicReference(UNDECIDED)
+
+        fun apply() {
+            while (true) {
+                when (val value1 = array[index1]) {
+                    is AtomicArrayWithCAS2<E>.DcssDescriptor -> {
+                        value1.doLogicalAndPhysicalApply()
+                    }
+
+                    is AtomicArrayWithCAS2<E>.CAS2Descriptor -> {
+                        value1.installIntoIndex2()
+                        value1.doLogicalAndPhysicalApply()
+                    }
+
+                    else -> {
+                        if (value1 != expected1) {
+                            status.set(FAILED)
+                            return
+                        }
+
+                        if (!dcss(index1, expected1, this, status, UNDECIDED)) {
+                            continue
+                        }
+
+                        installIntoIndex2()
+                        doLogicalAndPhysicalApply()
+                        return
+                    }
+                }
+            }
+        }
+
+        private fun installIntoIndex2() {
+            while (true) {
+                when (val value2 = array[index2]) {
+                    is AtomicArrayWithCAS2<E>.DcssDescriptor -> {
+                        value2.doLogicalAndPhysicalApply()
+                    }
+
+                    is AtomicArrayWithCAS2<E>.CAS2Descriptor -> {
+                        // already installed
+                        if (value2 === this) {
+                            return
+                        }
+
+                        value2.installIntoIndex2()
+                        value2.doLogicalAndPhysicalApply()
+                    }
+
+                    else -> {
+                        if (value2 != expected2) {
+                            status.compareAndSet(UNDECIDED, FAILED)
+                            return
+                        }
+
+                        if (status.get() != UNDECIDED) {
+                            return
+                        }
+
+                        // install yourself and exit on success
+                        if (dcss(index2, expected2, this, status, UNDECIDED)) {
+                            return
+                        }
+                    }
+                }
+            }
+        }
+
+        private fun doLogicalAndPhysicalApply() {
+            status.compareAndSet(UNDECIDED, SUCCESS)
+
+            val status = status.get()
+            check(status != UNDECIDED)
+
+            val desiredValue2 = if (status == SUCCESS) update2 else expected2
+            val desiredValue1 = if (status == SUCCESS) update1 else expected1
+
+            array.compareAndSet(index2, this, desiredValue2)
+            array.compareAndSet(index1, this, desiredValue1)
+        }
+
+        operator fun get(index: Int): E {
+            val shouldTakeExpected = when (status.get()) {
+                UNDECIDED, FAILED -> true
+                SUCCESS -> false
+            }
+
+            return when (index) {
+                index1 -> if (shouldTakeExpected) expected1 else update1
+                index2 -> if (shouldTakeExpected) expected2 else update2
+                else -> error("Index $index does not match any [$expected1, $expected2]")
+            }
+        }
+    }
+
+    fun dcss(
+        index: Int,
+        expectedCellState: Any,
+        updateCellState: Any,
+        statusReference: AtomicReference<CAS2Status>,
+        expectedStatus: CAS2Status,
+    ): Boolean {
+        val descriptor = DcssDescriptor(
+            index = index,
+            expectedCellState = expectedCellState,
+            updateCellState = updateCellState,
+            statusReference = statusReference,
+            expectedStatus = expectedStatus
+        )
+        descriptor.apply()
+        return descriptor.status.get() == DCSSStatus.SUCCESS
+    }
+
+    private inner class DcssDescriptor(
+        val index: Int,
+        val expectedCellState: Any,
+        val updateCellState: Any,
+        val statusReference: AtomicReference<CAS2Status>,
+        val expectedStatus: CAS2Status,
+    ) {
+        val status = AtomicReference(DCSSStatus.UNDECIDED)
+
+        fun apply() {
+            while (true) {
+                when (val curA = array.get(index)) {
+                    // help another thread to update the status
+                    is AtomicArrayWithCAS2<E>.DcssDescriptor -> {
+                        curA.doLogicalAndPhysicalApply()
+                    }
+
+                    expectedCellState -> {
+                        if (!array.compareAndSet(index, curA, this)) {
+                            continue
+                        }
+
+                        doLogicalAndPhysicalApply()
+                        return
+                    }
+
+                    else -> {
+                        status.set(DCSSStatus.FAILED)
+                        check(status.get() == DCSSStatus.FAILED)
+                        return
+                    }
+                }
+            }
+        }
+
+        fun doLogicalAndPhysicalApply() {
+            val newStatus = if (statusReference.get() == expectedStatus) DCSSStatus.SUCCESS else DCSSStatus.FAILED
+            status.compareAndSet(DCSSStatus.UNDECIDED, newStatus)
+
+            val finalStatus = status.get()
+            check(finalStatus != DCSSStatus.UNDECIDED)
+
+            val newA = if (finalStatus == DCSSStatus.SUCCESS) updateCellState else expectedCellState
+            array.compareAndSet(index, this, newA)
+        }
+    }
+
+    enum class CAS2Status {
+        UNDECIDED, SUCCESS, FAILED
+    }
+
+    enum class DCSSStatus {
+        UNDECIDED, SUCCESS, FAILED
     }
 }
