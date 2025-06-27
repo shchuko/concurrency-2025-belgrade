@@ -1,6 +1,7 @@
 package day4
 
 import java.util.concurrent.atomic.*
+import kotlin.math.absoluteValue
 
 class ConcurrentHashTableWithoutResize<K : Any, V : Any>(initialCapacity: Int) : HashTable<K, V> {
     private val table = AtomicReference(Table<K, V>(initialCapacity))
@@ -18,6 +19,7 @@ class ConcurrentHashTableWithoutResize<K : Any, V : Any>(initialCapacity: Int) :
             } else {
                 // The operation has been successfully performed,
                 // return the previous value associated with the key.
+                @Suppress("UNCHECKED_CAST")
                 return putResult as V?
             }
         }
@@ -40,21 +42,95 @@ class ConcurrentHashTableWithoutResize<K : Any, V : Any>(initialCapacity: Int) :
         val values = AtomicReferenceArray<V?>(capacity)
 
         fun put(key: K, value: V): Any? {
-            // TODO: Copy your implementation from `SingleWriterHashTable`
-            // TODO: and replace all writes to update key/value with CAS-s.
-            TODO("Implement me!")
+            var index = index(key)
+            // Search for a specified key probing `MAX_PROBES` cells.
+            // If neither the key nor an empty cell is found,
+            // inform the caller that the table should be resized.
+            var probes = 0
+            while (probes < MAX_PROBES) {
+                // Read the key.
+                val curValue = values[index]
+                when (val curKey = keys[index]) {
+                    // The cell contains the specified key.
+                    key -> {
+                        // Update the value and return the previous one.
+                        if (!values.compareAndSet(index, curValue, value)) continue
+                        return curValue
+                    }
+                    // The cell does not store a key.
+                    null -> {
+                        // Insert the key/value pair into this cell.
+                        if (!keys.compareAndSet(index, curKey, key)) continue
+                        if (!values.compareAndSet(index, curValue, value)) continue
+                        // No value was associated with the key.
+                        return null
+                    }
+                }
+                // Process the next cell, use linear probing.
+                index = (index + 1) % capacity
+                probes++
+            }
+            return NEEDS_REHASH
         }
 
         fun get(key: K): V? {
-            // TODO: Copy your implementation from `SingleWriterHashTable`.
-            TODO("Implement me!")
+            var index = index(key)
+            // Search for a specified key probing `MAX_PROBES` cells.
+            // If neither the key is not found after that,
+            // the table does not contain it.
+            repeat(MAX_PROBES) {
+                // Read the key.
+                val curKey = keys[index]
+                when (curKey) {
+                    // The cell contains the required key.
+                    key -> {
+                        // Read the value associated with the key.
+                        return values[index]
+                    }
+                    // Empty cell.
+                    null -> {
+                        // The key has not been found.
+                        return null
+                    }
+                }
+                // Process the next cell, use linear probing.
+                index = (index + 1) % capacity
+            }
+            // The key has not been found.
+            return null
         }
 
         fun remove(key: K): V? {
-            // TODO: Copy your implementation from `SingleWriterHashTable`
-            // TODO: and replace the write to update the value with CAS.
-            TODO("Implement me!")
+            var index = index(key)
+            // Search for a specified key probing `MAX_PROBES` cells.
+            // If neither the key is not found after that,
+            // the table does not contain it.
+            var probes = 0
+            while (probes < MAX_PROBES) {
+                // Read the key.
+                val curKey = keys[index]
+                when (curKey) {
+                    // The cell contains the required key.
+                    key -> {
+                        val oldValue = values[index]
+                        if (!values.compareAndSet(index, oldValue, null)) continue
+                        return oldValue
+                    }
+                    // Empty cell.
+                    null -> {
+                        // The key has not been found.
+                        return null
+                    }
+                }
+                // Process the next cell, use linear probing.
+                index = (index + 1) % capacity
+                probes++
+            }
+            // The key has not been found.
+            return null
         }
+
+        private fun index(key: Any) = ((key.hashCode() * MAGIC) % capacity).absoluteValue
     }
 }
 
