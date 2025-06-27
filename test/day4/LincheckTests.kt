@@ -7,7 +7,7 @@ import kotlin.concurrent.*
 import kotlin.test.*
 
 
-/* TODO: Let's write your first Lincheck test.
+/* Let's write your first Lincheck test.
          1. Add a `test()` function and annotate it with `@Test` to use JUnit.
          2. In this function, create an integer non-atomic counter
             and launch two threads that increment this counter.
@@ -21,7 +21,7 @@ import kotlin.test.*
 */
 class CounterTest {
     @Test
-    fun test() {
+    fun test() = Lincheck.runConcurrentTest {
         var counter = 0
         val t1 = thread {
             counter++
@@ -35,7 +35,7 @@ class CounterTest {
     }
 }
 
-/* TODO: Reveal a bug in `ScheduledThreadPoolExecutor` from the standard Java library.
+/* Reveal a bug in `ScheduledThreadPoolExecutor` from the standard Java library.
          1. Create a new `ScheduledThreadPoolExecutor` instance.
          2. In a parallel thread, shutdown this executor.
          3. In the main thread, schedule a task in this executor.
@@ -47,14 +47,51 @@ class CounterTest {
 class ScheduledThreadPoolExecutorTest {
     @Test
     fun test() = Lincheck.runConcurrentTest {
-       // TODO
+       val executor = ScheduledThreadPoolExecutor(1)
+        val t1 = thread {
+            executor.shutdown()
+        }
+        try {
+            executor.schedule({ }, 100, TimeUnit.MILLISECONDS).get()
+        } catch (_: RejectedExecutionException) {
+
+        }
+        t1.join()
     }
 }
 
-/* TODO: Write a Lincheck test for ConcurrentLinkedDeque
+/* Write a Lincheck test for ConcurrentLinkedDeque
          and reveal a concurrent bug. Please use the same API
          for data structures as we use in the course, and check
          all the peek/poll/add first/last operations on the deque.
  */
 class ConcurrentLinkedDequeTest {
+    private val deque = ConcurrentLinkedDeque<Int>()
+
+    @Operation
+    fun add(i: Int) = deque.add(i)
+
+    @Operation
+    fun addFirst(i: Int) = deque.addFirst(i)
+
+    @Operation
+    fun addLast(i: Int) = deque.addLast(i)
+
+    @Operation
+    fun pollFirst() = deque.pollFirst()
+
+    @Operation
+    fun pollLast() = deque.pollLast()
+
+    @Operation
+    fun peekFirst() = deque.peekFirst()
+
+    @Operation
+    fun peekLast() = deque.peekLast()
+
+    @Operation
+    fun removeFirst() = deque.removeFirst()
+
+    @Test
+    fun test() = ModelCheckingOptions().check(this::class)
 }
